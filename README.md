@@ -13,10 +13,10 @@ collections.
 ## Requirements
 
 * Node.js 20 or newer
-* For SonarQube for IDE: a Java 21+ runtime, with `JAVA_HOME` pointing at it.
-  On Ubuntu:
-  `sudo apt install openjdk-21-jre-headless` and
-  `export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-$(dpkg --print-architecture)`
+* For SonarQube for IDE: a Java 21+ runtime, which it finds through
+  `JAVA_HOME`. If `JAVA_HOME` is unset, the tool sets it to the installation
+  that the `java` on `PATH` reports. On Ubuntu:
+  `sudo apt install openjdk-21-jre-headless`
 * The extension `.vsix`, from the
   [sonarlint-vscode releases page](https://github.com/SonarSource/sonarlint-vscode/releases).
   The platform-independent `sonarlint-vscode-<version>.vsix` works on any

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const childProcess = require('child_process');
 const { parseArgs } = require('util');
 
 const { readSettingsFile, defaultSettingsFile, resolveSettings } = require('./settings');
@@ -39,6 +40,19 @@ results before the timeout, 1 on other errors.
 `;
 
 const SEVERITY_NAMES = ['error', 'warning', 'information', 'hint'];
+
+/**
+ * Ask the `java` on PATH for its installation directory, for extensions that
+ * find Java through JAVA_HOME. Returns undefined if there is no usable java.
+ */
+function javaHomeFromPath() {
+  const result = childProcess.spawnSync('java', ['-XshowSettings:properties', '-version'], { encoding: 'utf8' });
+  if (result.error || result.status !== 0) {
+    return undefined;
+  }
+  // The JVM prints its settings on stderr.
+  return /^\s*java\.home = (.*)$/m.exec(result.stderr)?.[1]?.trim();
+}
 
 function parseSettingArg(arg) {
   const eq = arg.indexOf('=');
@@ -196,6 +210,13 @@ async function main(argv) {
       log('extension-problems-cli', `unimplemented API used: ${what}`);
     }
   };
+
+  if (!process.env.JAVA_HOME) {
+    const javaHome = javaHomeFromPath();
+    if (javaHome) {
+      process.env.JAVA_HOME = javaHome;
+    }
+  }
 
   const workspaceFolder = path.resolve(values.workspace ?? process.cwd());
   const extensionCompileCommands = absoluteCompileCommands(compileCommands);
