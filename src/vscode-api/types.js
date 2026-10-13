@@ -1,3 +1,9 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Copyright (c) The VSCodium contributors.
+ *  Licensed under the MIT License. See LICENSE.txt in this directory for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 'use strict';
 
 // Value types, classes and enums from the `vscode` module, following the

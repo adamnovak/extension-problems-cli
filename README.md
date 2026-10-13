@@ -13,8 +13,10 @@ collections.
 ## Requirements
 
 * Node.js 20 or newer
-* For SonarQube for IDE: a Java 21+ runtime. On Ubuntu:
-  `sudo apt install openjdk-21-jre-headless`
+* For SonarQube for IDE: a Java 21+ runtime, with `JAVA_HOME` pointing at it.
+  On Ubuntu:
+  `sudo apt install openjdk-21-jre-headless` and
+  `export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-$(dpkg --print-architecture)`
 * The extension `.vsix`, from the
   [sonarlint-vscode releases page](https://github.com/SonarSource/sonarlint-vscode/releases).
   The platform-independent `sonarlint-vscode-<version>.vsix` works on any
@@ -28,8 +30,12 @@ npm install
 
 ```
 bin/extension-problems-cli.js --extension sonarlint-vscode-6.1.0.vsix \
-    --workspace path/to/project path/to/compile_commands.json
+    --workspace example example/compile_commands.json
 ```
+
+A compilation database with relative `directory` fields, like the one in
+`example/`, is taken relative to the database file. The extension is given an
+absolute-path copy, since the format requires absolute directories.
 
 Output is JSON:
 
@@ -72,17 +78,20 @@ Run `bin/extension-problems-cli.js --help` for all options. Useful ones:
 Exit status is 0 when every file got results, 2 when some files got none
 before `--timeout`, and 1 on other errors.
 
-### SonarQube for IDE settings
+### Default settings per extension
 
-When the extension is SonarQube for IDE, the tool sets:
+`extension-defaults/<extension id>.jsonc` holds settings applied before any
+given on the command line, in the format of VS Code's `settings.json`. String
+values can use these variables:
 
-* `sonarlint.disableTelemetry` to `true`, and passes
-  `-Dsonarlint.monitoring.enabled=false -Dsonarlint.telemetry.disabled=true`
-  to its language server through `sonarlint.ls.vmargs`. The editor-wide
-  `vscode.env.isTelemetryEnabled` is also `false`.
-* `sonarlint.pathToCompileCommands` to the given `compile_commands.json`.
-* `sonarlint.ls.javaHome` to `--java-home`, or else `JAVA_HOME`, or else the
-  installation that the `java` on `PATH` belongs to.
+* `${compileCommands}`: the compilation database, with absolute directories
+* `${workspaceFolder}`: the `--workspace` directory
+* `${env:NAME}`: an environment variable
+
+A setting that uses an unavailable variable is skipped.
+
+The SonarQube for IDE defaults turn off telemetry and monitoring and point the
+extension at the compilation database.
 
 ### First run
 
@@ -94,6 +103,12 @@ first run reports no C++ problems. Use a longer settle time for the first run:
 ```
 bin/extension-problems-cli.js --settle 60 --extension ... compile_commands.json
 ```
+
+## License
+
+`src/vscode-api/` implements the VS Code extension API and may contain code
+equivalent to VS Code's own, so it carries the VS Code and VSCodium MIT
+license in `src/vscode-api/LICENSE.txt`.
 
 ## How it works
 

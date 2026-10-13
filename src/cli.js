@@ -5,6 +5,8 @@ const os = require('os');
 const path = require('path');
 const { parseArgs } = require('util');
 
+const { readSettingsFile, defaultSettingsFile, resolveSettings } = require('./settings');
+
 const USAGE = `\
 Usage: extension-problems-cli --extension <vsix-or-dir> [options] <compile_commands.json>
 
@@ -20,8 +22,8 @@ Options:
   --setting KEY=VALUE  Set an extension setting; VALUE is parsed as JSON if
                        possible, otherwise used as a string (repeatable).
   --settings FILE      Read settings from a JSON object, as in settings.json.
-  --java-home DIR      Java runtime (21+) for the SonarQube for IDE language
-                       server (default: JAVA_HOME, or the java on PATH).
+                       These override the defaults this tool ships for the
+                       extension, in extension-defaults/.
   --format FORMAT      json (default) or pretty.
   --settle SECONDS     How long the extension must be quiet before results
                        are final (default: 5).
@@ -36,43 +38,7 @@ Exit status: 0 when every file was analyzed, 2 when some files got no
 results before the timeout, 1 on other errors.
 `;
 
-const SONARLINT_VMARGS = '-Dsonarlint.monitoring.enabled=false -Dsonarlint.telemetry.disabled=true';
-
 const SEVERITY_NAMES = ['error', 'warning', 'information', 'hint'];
-
-// Settings that SonarQube for IDE needs to analyze the compilation database
-// without phoning home.
-function sonarlintSettings({ compileCommands, javaHome }) {
-  const settings = {
-    'sonarlint.disableTelemetry': true,
-    'sonarlint.pathToCompileCommands': compileCommands,
-    // The extension starts its language server with monitoring (error
-    // reporting) enabled. JVM arguments from this setting come after the
-    // extension's own, so these take precedence.
-    'sonarlint.ls.vmargs': SONARLINT_VMARGS,
-  };
-  if (javaHome) {
-    settings['sonarlint.ls.javaHome'] = javaHome;
-  }
-  return settings;
-}
-
-/**
- * Find the system Java runtime: JAVA_HOME if set, otherwise the installation
- * that the `java` on PATH belongs to.
- */
-function findSystemJavaHome() {
-  if (process.env.JAVA_HOME) {
-    return process.env.JAVA_HOME;
-  }
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
-    const candidate = path.join(dir, process.platform === 'win32' ? 'java.exe' : 'java');
-    if (fs.existsSync(candidate)) {
-      return path.dirname(path.dirname(fs.realpathSync(candidate)));
-    }
-  }
-  return undefined;
-}
 
 function parseSettingArg(arg) {
   const eq = arg.indexOf('=');
@@ -89,14 +55,40 @@ function parseSettingArg(arg) {
   return [arg.slice(0, eq), value];
 }
 
-/** List the absolute source file paths in a compilation database, without duplicates. */
+/**
+ * List the absolute source file paths in a compilation database, without
+ * duplicates. A relative `directory` is taken relative to the database file.
+ */
 function filesFromCompileCommands(compileCommands) {
   const entries = JSON.parse(fs.readFileSync(compileCommands, 'utf8'));
   const files = new Set();
   for (const entry of entries) {
-    files.add(path.resolve(entry.directory ?? path.dirname(compileCommands), entry.file));
+    const directory = path.resolve(path.dirname(compileCommands), entry.directory ?? '.');
+    files.add(path.resolve(directory, entry.file));
   }
   return [...files];
+}
+
+/**
+ * Return the path of a compilation database whose `directory` fields are
+ * all absolute, as the JSON Compilation Database format requires.
+ *
+ * Databases written with relative directories, taken relative to the
+ * database file, are rewritten to a new temporary file, which is removed
+ * when the process exits.
+ */
+function absoluteCompileCommands(compileCommands) {
+  const entries = JSON.parse(fs.readFileSync(compileCommands, 'utf8'));
+  if (entries.every((e) => e.directory && path.isAbsolute(e.directory))) {
+    return compileCommands;
+  }
+  const base = path.dirname(compileCommands);
+  const fixed = entries.map((e) => ({ ...e, directory: path.resolve(base, e.directory ?? '.') }));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'extension-problems-cli-'));
+  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'compile_commands.json');
+  fs.writeFileSync(file, JSON.stringify(fixed, null, 2));
+  return file;
 }
 
 function toProblem({ collection, uri, diagnostic: d }) {
@@ -163,7 +155,6 @@ async function main(argv) {
       file: { type: 'string', multiple: true },
       setting: { type: 'string', multiple: true },
       settings: { type: 'string' },
-      'java-home': { type: 'string' },
       format: { type: 'string', default: 'json' },
       settle: { type: 'string', default: '5' },
       timeout: { type: 'string', default: '600' },
@@ -206,36 +197,37 @@ async function main(argv) {
     }
   };
 
+  const workspaceFolder = path.resolve(values.workspace ?? process.cwd());
+  const extensionCompileCommands = absoluteCompileCommands(compileCommands);
+
   // Loaded here so that --help works without dependencies installed.
   const { ExtensionHost } = require('./host');
   const host = new ExtensionHost({
     extension: path.resolve(values.extension),
-    workspaceFolders: [path.resolve(values.workspace ?? process.cwd())],
+    workspaceFolders: [workspaceFolder],
     stateDir,
     log,
     reportMissing,
   });
 
-  // Apply settings from least to most specific: the tool's defaults for
+  // Apply settings from least to most specific: the defaults shipped for
   // this extension, then the settings file, then --setting.
   const settings = {};
-  const isSonarlint = host.id.toLowerCase() === 'sonarsource.sonarlint-vscode';
-  if (isSonarlint) {
-    Object.assign(settings, sonarlintSettings({
-      compileCommands,
-      javaHome: values['java-home'] ? path.resolve(values['java-home']) : findSystemJavaHome(),
-    }));
+  const defaultsFile = defaultSettingsFile(host.id);
+  if (defaultsFile) {
+    const variables = {
+      workspaceFolder: workspaceFolder,
+      compileCommands: extensionCompileCommands,
+    };
+    Object.assign(settings, resolveSettings(readSettingsFile(defaultsFile), variables,
+      (message) => log('extension-problems-cli', `${path.basename(defaultsFile)}: ${message}`)));
   }
   if (values.settings) {
-    Object.assign(settings, JSON.parse(fs.readFileSync(values.settings, 'utf8')));
+    Object.assign(settings, readSettingsFile(values.settings));
   }
   for (const s of values.setting ?? []) {
     const [k, v] = parseSettingArg(s);
     settings[k] = v;
-  }
-  if (isSonarlint && !String(settings['sonarlint.ls.vmargs']).includes(SONARLINT_VMARGS)) {
-    // Keep monitoring and telemetry off even when the user adds JVM arguments.
-    settings['sonarlint.ls.vmargs'] = `${SONARLINT_VMARGS} ${settings['sonarlint.ls.vmargs']}`;
   }
   for (const [k, v] of Object.entries(settings)) {
     host.workbench.configuration.setUser(k, v);

@@ -1,0 +1,12 @@
+[
+  {
+    "directory": ".",
+    "arguments": ["c++", "-std=c++17", "-c", "src/main.cpp", "-o", "main.o"],
+    "file": "src/main.cpp"
+  },
+  {
+    "directory": ".",
+    "arguments": ["c++", "-std=c++17", "-c", "src/util.cpp", "-o", "util.o"],
+    "file": "src/util.cpp"
+  }
+]

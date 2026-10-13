@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
+    "jsonc-parser": "^3.3.1",
     "minimatch": "^10.2.6",
     "vscode-uri": "^3.2.0"
   }
