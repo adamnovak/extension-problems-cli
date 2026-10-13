@@ -1,14 +1,10 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const jsonc = require('jsonc-parser');
 
-// Files shipped with this tool to configure particular extensions.
-const DEFAULTS_DIR = path.resolve(__dirname, '..', 'extension-defaults');
-
 /** Read a JSON object from a file that may have comments and trailing commas, like settings.json. */
-function readSettingsFile(file) {
+function readJsoncObject(file) {
   const errors = [];
   const value = jsonc.parse(fs.readFileSync(file, 'utf8'), errors, { allowTrailingComma: true });
   if (errors.length) {
@@ -19,27 +15,6 @@ function readSettingsFile(file) {
     throw new Error(`${file}: must contain a JSON object`);
   }
   return value;
-}
-
-/**
- * Find a file shipped for an extension in extension-defaults/, named
- * `<extension id><suffix>`. Extension IDs are case-insensitive.
- */
-function findDefaultsFile(extensionId, suffix) {
-  let names;
-  try {
-    names = fs.readdirSync(DEFAULTS_DIR);
-  } catch {
-    return undefined;
-  }
-  const wanted = `${extensionId}${suffix}`.toLowerCase();
-  const name = names.find((n) => n.toLowerCase() === wanted);
-  return name && path.join(DEFAULTS_DIR, name);
-}
-
-/** Find the shipped default settings file for an extension ID, if there is one. */
-function defaultSettingsFile(extensionId) {
-  return findDefaultsFile(extensionId, '.jsonc');
 }
 
 class UnresolvedVariableError extends Error {}
@@ -86,4 +61,4 @@ function resolveSettings(settings, variables, warn) {
   return out;
 }
 
-module.exports = { readSettingsFile, findDefaultsFile, defaultSettingsFile, resolveSettings, substitute };
+module.exports = { readJsoncObject, resolveSettings, substitute };

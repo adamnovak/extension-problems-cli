@@ -78,29 +78,28 @@ Run `bin/extension-problems-cli.js --help` for all options. Useful ones:
 Exit status is 0 when every file got results, 2 when some files got none
 before `--timeout`, and 1 on other errors.
 
-### Default settings per extension
+### Extension configs
 
-`extension-defaults/<extension id>.jsonc` holds settings applied before any
-given on the command line, in the format of VS Code's `settings.json`. String
-values can use these variables:
+`extension-configs/<extension id>.jsonc` configures one extension. It may have
+comments and trailing commas, like VS Code's `settings.json`, and two
+optional sections:
 
-* `${compileCommands}`: the compilation database, with absolute directories
-* `${workspaceFolder}`: the `--workspace` directory
-* `${env:NAME}`: an environment variable
+* `settings`: settings applied before any given on the command line. String
+  values can use these variables:
+  * `${compileCommands}`: the compilation database, with absolute directories
+  * `${workspaceFolder}`: the `--workspace` directory
+  * `${env:NAME}`: an environment variable
 
-A setting that uses an unavailable variable is skipped.
+  A setting that uses an unavailable variable is skipped.
+* `readiness`: how to ask the extension's language server whether it can
+  analyze yet. Some servers are not ready right away; SonarQube for IDE, for
+  example, downloads its C/C++ analyzer on first use. The rule names an LSP
+  request to send through the extension's language client and which response
+  values mean "not ready". Files are opened only when the server is ready, and
+  opened again if it stops being ready.
 
-The SonarQube for IDE defaults turn off telemetry and monitoring and point the
-extension at the compilation database.
-
-### Waiting for the language server
-
-Some extensions' language servers are not ready to analyze right away;
-SonarQube for IDE, for example, downloads its C/C++ analyzer on first use.
-`extension-defaults/<extension id>.readiness.jsonc` says how to ask the
-server whether it is ready: an LSP request to send through the extension's
-language client, and which response values mean "not ready". Files are opened
-only when the server is ready, and opened again if it stops being ready.
+The SonarQube for IDE config turns off telemetry and monitoring, points the
+extension at the compilation database, and waits for analyzer downloads.
 
 The extension's `LanguageClient` is found when vscode-languageclient's
 document features subscribe to editor events, passing themselves as

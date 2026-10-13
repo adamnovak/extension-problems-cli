@@ -1,0 +1,22 @@
+// How to run SonarQube for IDE (sonarlint-vscode).
+{
+  // Applied before any settings given on the command line.
+  "settings": {
+    "sonarlint.disableTelemetry": true,
+    "sonarlint.pathToCompileCommands": "${compileCommands}",
+    // The extension starts its language server with monitoring (error
+    // reporting) enabled. JVM arguments from this setting come after the
+    // extension's own, so these take precedence. Keep them when overriding
+    // this setting.
+    "sonarlint.ls.vmargs": "-Dsonarlint.monitoring.enabled=false -Dsonarlint.telemetry.disabled=true",
+  },
+  // The extension downloads some analyzers, including C/C++, after it
+  // starts. Files analyzed before their analyzer arrives get no issues.
+  "readiness": {
+    "client": "SonarLint Language Server",
+    "request": "sonarlint/getPluginStatuses",
+    "params": {},
+    // 2 is PluginStateDto.DOWNLOADING; the server sends enums as ordinals.
+    "notReadyWhen": { "path": "pluginStatuses.*.state", "equals": 2 },
+  },
+}

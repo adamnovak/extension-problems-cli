@@ -6,8 +6,8 @@ const path = require('path');
 const childProcess = require('child_process');
 const { parseArgs } = require('util');
 
-const { readSettingsFile, defaultSettingsFile, resolveSettings } = require('./settings');
-const { loadReadinessRule } = require('./readiness');
+const { readJsoncObject, resolveSettings } = require('./settings');
+const { loadExtensionConfig } = require('./extension-config');
 
 const USAGE = `\
 Usage: extension-problems-cli --extension <vsix-or-dir> [options] <compile_commands.json>
@@ -25,7 +25,7 @@ Options:
                        possible, otherwise used as a string (repeatable).
   --settings FILE      Read settings from a JSON object, as in settings.json.
                        These override the defaults this tool ships for the
-                       extension, in extension-defaults/.
+                       extension, in extension-configs/.
   --format FORMAT      json (default) or pretty.
   --timeout SECONDS    Give up waiting for results after this long
                        (default: 1800).
@@ -233,17 +233,17 @@ async function main(argv) {
   // Apply settings from least to most specific: the defaults shipped for
   // this extension, then the settings file, then --setting.
   const settings = {};
-  const defaultsFile = defaultSettingsFile(host.id);
-  if (defaultsFile) {
+  const { config, file: configFile } = loadExtensionConfig(host.id);
+  if (config.settings) {
     const variables = {
       workspaceFolder: workspaceFolder,
       compileCommands: extensionCompileCommands,
     };
-    Object.assign(settings, resolveSettings(readSettingsFile(defaultsFile), variables,
-      (message) => log('extension-problems-cli', `${path.basename(defaultsFile)}: ${message}`)));
+    Object.assign(settings, resolveSettings(config.settings, variables,
+      (message) => log('extension-problems-cli', `${path.basename(configFile)}: ${message}`)));
   }
   if (values.settings) {
-    Object.assign(settings, readSettingsFile(values.settings));
+    Object.assign(settings, readJsoncObject(values.settings));
   }
   for (const s of values.setting ?? []) {
     const [k, v] = parseSettingArg(s);
@@ -257,7 +257,7 @@ async function main(argv) {
   try {
     await host.activate();
     const { timedOut, unreported } = await host.analyze(files, {
-      readiness: loadReadinessRule(host.id),
+      readiness: config.readiness,
       timeoutMs: Number(values.timeout) * 1000,
     });
     if (timedOut) {

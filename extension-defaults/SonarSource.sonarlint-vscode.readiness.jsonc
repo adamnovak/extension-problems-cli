@@ -1,9 +1,0 @@
-// SonarQube for IDE downloads some analyzers, including C/C++, after it
-// starts. Files analyzed before their analyzer arrives get no issues.
-{
-  "client": "SonarLint Language Server",
-  "request": "sonarlint/getPluginStatuses",
-  "params": {},
-  // 2 is PluginStateDto.DOWNLOADING; the server sends enums as ordinals.
-  "notReadyWhen": { "path": "pluginStatuses.*.state", "equals": 2 },
-}

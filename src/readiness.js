@@ -1,10 +1,9 @@
 'use strict';
 
-const { readSettingsFile, findDefaultsFile } = require('./settings');
-
 /**
- * A way to ask an extension's language server whether it can analyze files
- * yet, read from `extension-defaults/<extension id>.readiness.jsonc`:
+ * A readiness rule says how to ask an extension's language server whether
+ * it can analyze files yet. It is the `readiness` section of an extension
+ * config (see extension-config.js):
  *
  *   {
  *     "client": "<LanguageClient name; optional if there is only one>",
@@ -16,11 +15,6 @@ const { readSettingsFile, findDefaultsFile } = require('./settings');
  * The server is not ready while any value at `path` in the response equals
  * `equals`.
  */
-function loadReadinessRule(extensionId) {
-  const file = findDefaultsFile(extensionId, '.readiness.jsonc');
-  return file && readSettingsFile(file);
-}
-
 /** All values at a dotted path, where a `*` part matches every element. */
 function valuesAt(value, parts) {
   if (parts.length === 0) {
@@ -39,4 +33,4 @@ function isNotReady(rule, response) {
   return valuesAt(response, p.split('.')).some((v) => v === equals);
 }
 
-module.exports = { loadReadinessRule, isNotReady, valuesAt };
+module.exports = { isNotReady, valuesAt };
