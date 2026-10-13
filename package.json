@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Run a VS Code extension headlessly against a C/C++ compilation database and print the problems it reports",
   "private": true,
+  "license": "MIT",
   "bin": {
     "extension-problems-cli": "bin/extension-problems-cli.js"
   },
