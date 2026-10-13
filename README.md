@@ -10,16 +10,8 @@ It is also not affiliated with SonarSource Sàrl's [SonarQube](https://www.sonar
 
 ## Setup
 
-You need Node.js 20.12 or newer. Clone this repository and install its
-dependencies:
-
-```
-git clone <this repository> ~/extension-problems-cli
-cd ~/extension-problems-cli
-npm install
-```
-
-Then run it from any directory with `npx ~/extension-problems-cli`.
+You need Node.js 20.12 or newer. Run the tool straight from GitHub with
+`npx github:adamnovak/extension-problems-cli`.
 
 You also need the extension you want to run, as a `.vsix` file.
 
@@ -29,14 +21,14 @@ Give it the extension and the files or directories to analyze. It searches
 directories recursively, skipping hidden ones and `node_modules`:
 
 ```
-npx ~/extension-problems-cli --extension EXTENSION.vsix src test
+npx github:adamnovak/extension-problems-cli --extension EXTENSION.vsix src test
 ```
 
 For C or C++, give it your compilation database instead. It analyzes every
 file listed there:
 
 ```
-npx ~/extension-problems-cli --extension EXTENSION.vsix \
+npx github:adamnovak/extension-problems-cli --extension EXTENSION.vsix \
     --compile-commands build/compile_commands.json
 ```
 
@@ -82,7 +74,7 @@ Analyze a C++ project:
 
 ```
 cd ~/project
-npx ~/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix \
+npx github:adamnovak/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix \
     --compile-commands build/compile_commands.json
 ```
 
@@ -113,16 +105,30 @@ The tool waits for the download, so the results are still complete.
 Analyze a JavaScript project's source and tests:
 
 ```
-npx ~/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix src test
+npx github:adamnovak/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix src test
 ```
 
 Turn off a rule by its code:
 
 ```
-npx ~/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix \
+npx github:adamnovak/extension-problems-cli --extension ~/sonarlint-vscode-6.1.0.vsix \
     --setting 'sonarlint.rules={"cpp:S5827":{"level":"off"}}' \
     --compile-commands build/compile_commands.json
 ```
+
+## Running from source
+
+To change the tool, or to add an extension configuration, clone it and
+install its dependencies:
+
+```
+git clone https://github.com/adamnovak/extension-problems-cli.git ~/extension-problems-cli
+cd ~/extension-problems-cli
+npm install
+```
+
+Then run your copy from any directory with `npx ~/extension-problems-cli`
+in place of `npx github:adamnovak/extension-problems-cli`.
 
 ## Adding More Extensions
 
