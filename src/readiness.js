@@ -30,7 +30,7 @@ function valuesAt(value, parts) {
 
 function isNotReady(rule, response) {
   const { path: p, equals } = rule.notReadyWhen;
-  return valuesAt(response, p.split('.')).some((v) => v === equals);
+  return valuesAt(response, p.split('.')).includes(equals);
 }
 
 module.exports = { isNotReady, valuesAt };

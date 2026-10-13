@@ -60,7 +60,9 @@ class EventEmitter {
   }
 
   fire(data) {
-    for (const { listener, thisArgs } of [...this._listeners]) {
+    // Listeners subscribed while this event is delivered get the next one.
+    const current = Array.from(this._listeners);
+    for (const { listener, thisArgs } of current) {
       try {
         listener.call(thisArgs, data);
       } catch (e) {
@@ -255,9 +257,15 @@ class WorkspaceEdit {
     }
     return [...byUri.values()];
   }
-  createFile() {}
-  deleteFile() {}
-  renameFile() {}
+  createFile() {
+    // File operations are not recorded, because workspace.applyEdit() never applies edits.
+  }
+  deleteFile() {
+    // File operations are not recorded, because workspace.applyEdit() never applies edits.
+  }
+  renameFile() {
+    // File operations are not recorded, because workspace.applyEdit() never applies edits.
+  }
 }
 
 class MarkdownString {
@@ -265,17 +273,25 @@ class MarkdownString {
     this.value = value;
     this.supportThemeIcons = supportThemeIcons;
   }
-  appendText(value) { this.value += value.replace(/[\\`*_{}[\]()#+\-.!]/g, '\\$&'); return this; }
+  appendText(value) { this.value += value.replaceAll(/[\\`*_{}[\]()#+\-.!]/g, String.raw`\$&`); return this; }
   appendMarkdown(value) { this.value += value; return this; }
   appendCodeblock(code, language = '') { this.value += `\n\`\`\`${language}\n${code}\n\`\`\`\n`; return this; }
 }
 
 class SnippetString {
   constructor(value = '') { this.value = value; }
-  appendText(s) { this.value += s.replace(/[$}\\]/g, '\\$&'); return this; }
-  appendPlaceholder(s) { this.value += `\${${typeof s === 'string' ? s : ''}}`; return this; }
+  appendText(s) { this.value += s.replaceAll(/[$}\\]/g, String.raw`\$&`); return this; }
+  appendPlaceholder(s) {
+    const text = typeof s === 'string' ? s : '';
+    this.value += `\${${text}}`;
+    return this;
+  }
   appendTabstop(n = 0) { this.value += `$${n}`; return this; }
-  appendVariable(name, def) { this.value += `\${${name}${def ? `:${def}` : ''}}`; return this; }
+  appendVariable(name, def) {
+    const suffix = def ? ':' + def : '';
+    this.value += `\${${name}${suffix}}`;
+    return this;
+  }
 }
 
 class ThemeIcon {
@@ -389,13 +405,23 @@ class SymbolInformation {
 
 class DocumentSymbol {
   constructor(name, detail, kind, range, selectionRange) {
-    Object.assign(this, { name, detail, kind, range, selectionRange, children: [] });
+    this.name = name;
+    this.detail = detail;
+    this.kind = kind;
+    this.range = range;
+    this.selectionRange = selectionRange;
+    this.children = [];
   }
 }
 
 class CallHierarchyItem {
   constructor(kind, name, detail, uri, range, selectionRange) {
-    Object.assign(this, { kind, name, detail, uri, range, selectionRange });
+    this.kind = kind;
+    this.name = name;
+    this.detail = detail;
+    this.uri = uri;
+    this.range = range;
+    this.selectionRange = selectionRange;
   }
 }
 
@@ -403,7 +429,9 @@ class TypeHierarchyItem extends CallHierarchyItem {}
 
 class FoldingRange {
   constructor(start, end, kind) {
-    Object.assign(this, { start, end, kind });
+    this.start = start;
+    this.end = end;
+    this.kind = kind;
   }
 }
 
@@ -437,7 +465,9 @@ class SemanticTokensEdits {
 
 class SemanticTokensEdit {
   constructor(start, deleteCount, data) {
-    Object.assign(this, { start, deleteCount, data });
+    this.start = start;
+    this.deleteCount = deleteCount;
+    this.data = data;
   }
 }
 

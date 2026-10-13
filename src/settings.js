@@ -1,6 +1,6 @@
 'use strict';
 
-const fs = require('fs');
+const fs = require('node:fs');
 const jsonc = require('jsonc-parser');
 
 /** Read a JSON object from a file that may have comments and trailing commas, like settings.json. */

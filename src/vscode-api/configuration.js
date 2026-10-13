@@ -95,45 +95,44 @@ class ConfigurationStore {
     return merge(getPath(this._defaults, key), getPath(this._user, key));
   }
 
+  /** Set (or, with undefined, remove) a user setting, and announce the change. */
+  update(key, value) {
+    if (value === undefined) {
+      const parts = key.split('.');
+      const parent = getPath(this._user, parts.slice(0, -1).join('.'));
+      if (isPlainObject(parent)) delete parent[parts.at(-1)];
+    } else {
+      setPath(this._user, key, deepClone(value));
+    }
+    this._onDidChange.fire({
+      affectsConfiguration: (s) => s === key || key.startsWith(`${s}.`) || s.startsWith(`${key}.`),
+    });
+    return Promise.resolve();
+  }
+
   getConfiguration(section) {
-    const store = this;
-    const full = (key) => (section ? (key ? `${section}.${key}` : section) : key);
+    const full = (key) => qualify(section, key);
     const config = {
-      get(key, defaultValue) {
-        const v = store._effective(full(key));
+      get: (key, defaultValue) => {
+        const v = this._effective(full(key));
         return v === undefined ? defaultValue : deepClone(v);
       },
-      has(key) {
-        return store._effective(full(key)) !== undefined;
-      },
-      inspect(key) {
+      has: (key) => this._effective(full(key)) !== undefined,
+      inspect: (key) => {
         const k = full(key);
         return {
           key: k,
-          defaultValue: deepClone(getPath(store._defaults, k)),
-          globalValue: deepClone(getPath(store._user, k)),
+          defaultValue: deepClone(getPath(this._defaults, k)),
+          globalValue: deepClone(getPath(this._user, k)),
           workspaceValue: undefined,
           workspaceFolderValue: undefined,
         };
       },
-      update(key, value) {
-        const k = full(key);
-        if (value === undefined) {
-          const parts = k.split('.');
-          const parent = getPath(store._user, parts.slice(0, -1).join('.'));
-          if (isPlainObject(parent)) delete parent[parts[parts.length - 1]];
-        } else {
-          setPath(store._user, k, deepClone(value));
-        }
-        store._onDidChange.fire({
-          affectsConfiguration: (s) => s === k || k.startsWith(`${s}.`) || s.startsWith(`${k}.`),
-        });
-        return Promise.resolve();
-      },
+      update: (key, value) => this.update(full(key), value),
     };
     // A WorkspaceConfiguration also exposes the section's settings as
     // read-only properties.
-    const tree = store._effective(section ?? '');
+    const tree = this._effective(section ?? '');
     if (isPlainObject(tree)) {
       for (const [k, v] of Object.entries(tree)) {
         if (!(k in config)) config[k] = deepClone(v);
@@ -141,6 +140,12 @@ class ConfigurationStore {
     }
     return Object.freeze(config);
   }
+}
+
+/** Join a configuration section and a key within it into a full setting name. */
+function qualify(section, key) {
+  if (!section) return key;
+  return key ? `${section}.${key}` : section;
 }
 
 function defaultForType(type) {

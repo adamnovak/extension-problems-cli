@@ -114,7 +114,7 @@ class TextDocument {
     return new Range(this.validatePosition(range.start), this.validatePosition(range.end));
   }
 
-  getWordRangeAtPosition(position, regex = /[A-Za-z_][A-Za-z0-9_]*/g) {
+  getWordRangeAtPosition(position, regex = /[A-Za-z_]\w*/g) {
     const p = this.validatePosition(position);
     const { text } = this.lineAt(p.line);
     const re = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);

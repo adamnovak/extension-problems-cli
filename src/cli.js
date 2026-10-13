@@ -1,57 +1,96 @@
 'use strict';
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
-const { parseArgs } = require('util');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const childProcess = require('node:child_process');
+const { parseArgs } = require('node:util');
 
 const { readJsoncObject, resolveSettings } = require('./settings');
 const { loadExtensionConfig } = require('./extension-config');
+const { filesFromCompileCommands, absoluteCompileCommands } = require('./compile-commands');
+const { collectFiles } = require('./files');
+const { toProblem, compareProblems, formatPretty, formatJson } = require('./output');
 
 const USAGE = `\
-Usage: extension-problems-cli --extension <vsix-or-dir> [options] <compile_commands.json>
+Usage: extension-problems-cli --extension <vsix-or-dir> [options] [PATH...]
 
-Load a VS Code extension without VS Code, open every source file listed in
-the compilation database, and print the problems the extension reports.
+Load a VS Code extension without VS Code, open files in it, and print the
+problems it reports.
+
+Each PATH is a file or a directory. Directories are searched for files in
+languages the editor or the extension knows, skipping hidden entries and
+node_modules. With no PATH, the files in the --compile-commands database are
+analyzed.
 
 Options:
-  --extension PATH     Extension .vsix file or unpacked extension directory.
-  --workspace DIR      Workspace folder to present to the extension
-                       (default: current directory).
-  --file FILE          Analyze only this file (repeatable; default: every file
-                       in the compilation database).
-  --setting KEY=VALUE  Set an extension setting; VALUE is parsed as JSON if
-                       possible, otherwise used as a string (repeatable).
-  --settings FILE      Read settings from a JSON object, as in settings.json.
-                       These override the defaults this tool ships for the
-                       extension, in extension-configs/.
-  --format FORMAT      json (default) or pretty.
-  --timeout SECONDS    Give up waiting for results after this long
-                       (default: 1800).
-  --state-dir DIR      Where to keep extension storage between runs
-                       (default: $XDG_CACHE_HOME/extension-problems-cli).
-  --log FILE           Write extension output channels and messages to FILE.
-  --verbose            Write extension output channels and messages to stderr.
-  -h, --help           Show this help.
+  --extension PATH         Extension .vsix file or unpacked extension directory.
+  --compile-commands FILE  C/C++ compilation database (compile_commands.json)
+                           for extensions that use one.
+  --workspace DIR          Workspace folder to present to the extension
+                           (default: current directory).
+  --setting KEY=VALUE      Set an extension setting; VALUE is parsed as JSON if
+                           possible, otherwise used as a string (repeatable).
+  --settings FILE          Read settings from a JSON object, as in
+                           settings.json. These override the defaults this tool
+                           ships for the extension.
+  --format FORMAT          json (default) or pretty.
+  --timeout SECONDS        Give up waiting for results after this long
+                           (default: 1800).
+  --state-dir DIR          Where to keep extension storage between runs
+                           (default: $XDG_CACHE_HOME/extension-problems-cli).
+  --log FILE               Write extension output and messages to FILE.
+  --verbose                Write extension output and messages to stderr.
+  -h, --help               Show this help.
 
 Exit status: 0 when every file was analyzed, 2 when some files got no
 results before the timeout, 1 on other errors.
 `;
 
-const SEVERITY_NAMES = ['error', 'warning', 'information', 'hint'];
+const OPTIONS = {
+  extension: { type: 'string' },
+  'compile-commands': { type: 'string' },
+  workspace: { type: 'string' },
+  setting: { type: 'string', multiple: true },
+  settings: { type: 'string' },
+  format: { type: 'string', default: 'json' },
+  timeout: { type: 'string', default: '1800' },
+  'state-dir': { type: 'string' },
+  log: { type: 'string' },
+  verbose: { type: 'boolean', default: false },
+  help: { type: 'boolean', short: 'h', default: false },
+};
+
+const FORMATTERS = { json: formatJson, pretty: formatPretty };
+
+/** Find an executable by name in the directories on PATH. */
+function findOnPath(name) {
+  const names = process.platform === 'win32' ? [`${name}.exe`] : [name];
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+    for (const candidate of names.map((n) => path.join(dir, n))) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
 
 /**
  * Ask the `java` on PATH for its installation directory, for extensions that
  * find Java through JAVA_HOME. Returns undefined if there is no usable java.
  */
 function javaHomeFromPath() {
-  const result = childProcess.spawnSync('java', ['-XshowSettings:properties', '-version'], { encoding: 'utf8' });
+  const java = findOnPath('java');
+  if (!java) {
+    return undefined;
+  }
+  const result = childProcess.spawnSync(java, ['-XshowSettings:properties', '-version'], { encoding: 'utf8' });
   if (result.error || result.status !== 0) {
     return undefined;
   }
-  // The JVM prints its settings on stderr.
-  return /^\s*java\.home = (.*)$/m.exec(result.stderr)?.[1]?.trim();
+  // The JVM prints its settings on stderr, one `name = value` per line.
+  const prefix = 'java.home = ';
+  const line = result.stderr.split('\n').map((l) => l.trim()).find((l) => l.startsWith(prefix));
+  return line?.slice(prefix.length);
 }
 
 function parseSettingArg(arg) {
@@ -70,137 +109,15 @@ function parseSettingArg(arg) {
 }
 
 /**
- * List the absolute source file paths in a compilation database, without
- * duplicates. A relative `directory` is taken relative to the database file.
+ * Make the logging functions: `log` for extension output and messages, and
+ * `reportMissing` for uses of unimplemented editor API.
  */
-function filesFromCompileCommands(compileCommands) {
-  const entries = JSON.parse(fs.readFileSync(compileCommands, 'utf8'));
-  const files = new Set();
-  for (const entry of entries) {
-    const directory = path.resolve(path.dirname(compileCommands), entry.directory ?? '.');
-    files.add(path.resolve(directory, entry.file));
-  }
-  return [...files];
-}
-
-/**
- * Return the path of a compilation database whose `directory` fields are
- * all absolute, as the JSON Compilation Database format requires.
- *
- * Databases written with relative directories, taken relative to the
- * database file, are rewritten to a new temporary file, which is removed
- * when the process exits.
- */
-function absoluteCompileCommands(compileCommands) {
-  const entries = JSON.parse(fs.readFileSync(compileCommands, 'utf8'));
-  if (entries.every((e) => e.directory && path.isAbsolute(e.directory))) {
-    return compileCommands;
-  }
-  const base = path.dirname(compileCommands);
-  const fixed = entries.map((e) => ({ ...e, directory: path.resolve(base, e.directory ?? '.') }));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'extension-problems-cli-'));
-  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
-  const file = path.join(dir, 'compile_commands.json');
-  fs.writeFileSync(file, JSON.stringify(fixed, null, 2));
-  return file;
-}
-
-function toProblem({ collection, uri, diagnostic: d }) {
-  const code = d.code && typeof d.code === 'object' ? d.code.value : d.code;
-  const codeUrl = d.code && typeof d.code === 'object' ? d.code.target?.toString() : undefined;
-  const span = (r) => ({
-    line: r.start.line + 1,
-    column: r.start.character + 1,
-    endLine: r.end.line + 1,
-    endColumn: r.end.character + 1,
-  });
-  const problem = {
-    file: uri.scheme === 'file' ? uri.fsPath : uri.toString(),
-    ...span(d.range),
-    severity: SEVERITY_NAMES[d.severity] ?? String(d.severity),
-    message: d.message,
-    source: d.source,
-    code: code === undefined ? undefined : String(code),
-    codeUrl,
-    collection,
-  };
-  if (d.tags?.length) {
-    problem.tags = d.tags.map((t) => ({ 1: 'unnecessary', 2: 'deprecated' }[t] ?? t));
-  }
-  if (d.relatedInformation?.length) {
-    problem.relatedInformation = d.relatedInformation.map((ri) => ({
-      file: ri.location.uri.scheme === 'file' ? ri.location.uri.fsPath : ri.location.uri.toString(),
-      ...span(ri.location.range),
-      message: ri.message,
-    }));
-  }
-  return problem;
-}
-
-function compareProblems(a, b) {
-  return a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column
-    || a.message.localeCompare(b.message);
-}
-
-function formatPretty(result) {
-  const lines = [];
-  for (const p of result.problems) {
-    const rel = path.relative(process.cwd(), p.file);
-    const where = rel.startsWith('..') ? p.file : rel;
-    const tag = [p.source, p.code].filter(Boolean).join(' ');
-    lines.push(`${where}:${p.line}:${p.column}: ${p.severity}: ${p.message}${tag ? ` [${tag}]` : ''}`);
-    for (const ri of p.relatedInformation ?? []) {
-      lines.push(`  ${path.relative(process.cwd(), ri.file)}:${ri.line}:${ri.column}: note: ${ri.message}`);
-    }
-  }
-  for (const f of result.unanalyzedFiles) {
-    lines.push(`${path.relative(process.cwd(), f)}: no results from the extension`);
-  }
-  return lines.join('\n') + (lines.length ? '\n' : '');
-}
-
-async function main(argv) {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      extension: { type: 'string' },
-      workspace: { type: 'string' },
-      file: { type: 'string', multiple: true },
-      setting: { type: 'string', multiple: true },
-      settings: { type: 'string' },
-      format: { type: 'string', default: 'json' },
-      timeout: { type: 'string', default: '1800' },
-      'state-dir': { type: 'string' },
-      log: { type: 'string' },
-      verbose: { type: 'boolean', default: false },
-      help: { type: 'boolean', short: 'h', default: false },
-    },
-  });
-  if (values.help) {
-    process.stdout.write(USAGE);
-    return 0;
-  }
-  if (positionals.length !== 1 || !values.extension) {
-    process.stderr.write(USAGE);
-    return 1;
-  }
-  if (!['json', 'pretty'].includes(values.format)) {
-    throw new Error(`unknown --format ${values.format}`);
-  }
-
-  const compileCommands = path.resolve(positionals[0]);
-  const files = values.file?.length
-    ? values.file.map((f) => path.resolve(f))
-    : filesFromCompileCommands(compileCommands);
-  const stateDir = path.resolve(values['state-dir']
-    ?? path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'extension-problems-cli'));
-
-  const logStream = values.log ? fs.createWriteStream(values.log) : null;
+function makeLoggers({ logFile, verbose }) {
+  const stream = logFile ? fs.createWriteStream(logFile) : null;
   const log = (channel, text) => {
     const line = `[${channel}] ${text}\n`;
-    logStream?.write(line);
-    if (values.verbose) process.stderr.write(line);
+    stream?.write(line);
+    if (verbose) process.stderr.write(line);
   };
   const missing = new Set();
   const reportMissing = (what) => {
@@ -209,51 +126,83 @@ async function main(argv) {
       log('extension-problems-cli', `unimplemented API used: ${what}`);
     }
   };
+  const close = () => (stream ? new Promise((resolve) => stream.end(resolve)) : Promise.resolve());
+  return { log, reportMissing, close };
+}
+
+/**
+ * Combine settings from least to most specific: the defaults shipped for the
+ * extension, then the --settings file, then each --setting.
+ */
+function gatherSettings({ config, configFile, variables, values, log }) {
+  const settings = {};
+  if (config.settings) {
+    const warn = (message) => log('extension-problems-cli', `${path.basename(configFile)}: ${message}`);
+    Object.assign(settings, resolveSettings(config.settings, variables, warn));
+  }
+  if (values.settings) {
+    Object.assign(settings, readJsoncObject(values.settings));
+  }
+  for (const arg of values.setting ?? []) {
+    const [key, value] = parseSettingArg(arg);
+    settings[key] = value;
+  }
+  return settings;
+}
+
+function defaultStateDir() {
+  const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(cacheHome, 'extension-problems-cli');
+}
+
+async function main(argv) {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: OPTIONS });
+  if (values.help) {
+    process.stdout.write(USAGE);
+    return 0;
+  }
+  const compileCommands = values['compile-commands'] && path.resolve(values['compile-commands']);
+  if (!values.extension || (positionals.length === 0 && !compileCommands)) {
+    process.stderr.write(USAGE);
+    return 1;
+  }
+  const format = FORMATTERS[values.format];
+  if (!format) {
+    throw new Error(`unknown --format ${values.format}`);
+  }
 
   if (!process.env.JAVA_HOME) {
     const javaHome = javaHomeFromPath();
-    if (javaHome) {
-      process.env.JAVA_HOME = javaHome;
-    }
+    if (javaHome) process.env.JAVA_HOME = javaHome;
   }
 
+  const loggers = makeLoggers({ logFile: values.log, verbose: values.verbose });
   const workspaceFolder = path.resolve(values.workspace ?? process.cwd());
-  const extensionCompileCommands = absoluteCompileCommands(compileCommands);
 
   // Loaded here so that --help works without dependencies installed.
   const { ExtensionHost } = require('./host');
   const host = new ExtensionHost({
     extension: path.resolve(values.extension),
     workspaceFolders: [workspaceFolder],
-    stateDir,
-    log,
-    reportMissing,
+    stateDir: path.resolve(values['state-dir'] ?? defaultStateDir()),
+    log: loggers.log,
+    reportMissing: loggers.reportMissing,
   });
 
-  // Apply settings from least to most specific: the defaults shipped for
-  // this extension, then the settings file, then --setting.
-  const settings = {};
+  const files = positionals.length
+    ? collectFiles(positionals, (file) => host.workbench.languageIdForPath(file) !== undefined)
+    : filesFromCompileCommands(compileCommands);
+
   const { config, file: configFile } = loadExtensionConfig(host.id);
-  if (config.settings) {
-    const variables = {
-      workspaceFolder: workspaceFolder,
-      compileCommands: extensionCompileCommands,
-    };
-    Object.assign(settings, resolveSettings(config.settings, variables,
-      (message) => log('extension-problems-cli', `${path.basename(configFile)}: ${message}`)));
-  }
-  if (values.settings) {
-    Object.assign(settings, readJsoncObject(values.settings));
-  }
-  for (const s of values.setting ?? []) {
-    const [k, v] = parseSettingArg(s);
-    settings[k] = v;
-  }
-  for (const [k, v] of Object.entries(settings)) {
-    host.workbench.configuration.setUser(k, v);
+  const variables = {
+    workspaceFolder,
+    compileCommands: compileCommands && absoluteCompileCommands(compileCommands),
+  };
+  const settings = gatherSettings({ config, configFile, variables, values, log: loggers.log });
+  for (const [key, value] of Object.entries(settings)) {
+    host.workbench.configuration.setUser(key, value);
   }
 
-  let status = 0;
   try {
     await host.activate();
     const { timedOut, unreported } = await host.analyze(files, {
@@ -261,22 +210,15 @@ async function main(argv) {
       timeoutMs: Number(values.timeout) * 1000,
     });
     if (timedOut) {
-      process.stderr.write(`extension-problems-cli: timed out waiting for the extension to finish\n`);
+      process.stderr.write('extension-problems-cli: timed out waiting for the extension to finish\n');
     }
-    if (unreported.length) {
-      status = 2;
-    }
-    const result = {
-      extension: host.id,
-      problems: host.collectDiagnostics().map(toProblem).sort(compareProblems),
-      unanalyzedFiles: unreported,
-    };
-    process.stdout.write(values.format === 'json' ? `${JSON.stringify(result, null, 2)}\n` : formatPretty(result));
+    const problems = host.collectDiagnostics().map(toProblem).sort(compareProblems);
+    process.stdout.write(format({ extension: host.id, problems, unanalyzedFiles: unreported }));
+    return unreported.length ? 2 : 0;
   } finally {
     await host.shutdown();
-    if (logStream) await new Promise((resolve) => logStream.end(resolve));
+    await loggers.close();
   }
-  return status;
 }
 
-module.exports = { main, filesFromCompileCommands, toProblem };
+module.exports = { main };

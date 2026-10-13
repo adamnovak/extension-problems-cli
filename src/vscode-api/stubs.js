@@ -8,7 +8,24 @@
 
 const { Disposable } = require('./types');
 
-const NEVER_FIRES = () => new Disposable(() => {});
+/**
+ * Do nothing. Used for API members whose effects would only be visible in
+ * editor UI, which does not exist here.
+ */
+function ignore() {
+  // Intentionally empty.
+}
+
+/** An event that never fires: subscribing returns a Disposable and nothing else. */
+const NEVER_FIRES = () => new Disposable(ignore);
+
+/**
+ * The common target of every stub Proxy. Its own properties are never
+ * changed, so stubs can share it.
+ */
+function stubTarget() {
+  // Calls are handled by the Proxy.
+}
 
 /**
  * Make a value that can stand in for any unimplemented API member: it can be
@@ -19,13 +36,12 @@ const NEVER_FIRES = () => new Disposable(() => {});
  * hanging.
  */
 function makeStub(name, report) {
-  const target = function stub() {};
-  return new Proxy(target, {
+  return new Proxy(stubTarget, {
     get(t, prop) {
       if (prop === 'then' || typeof prop === 'symbol') return undefined;
       if (prop === 'toString' || prop === 'valueOf' || prop === 'toJSON') return () => `[stub ${name}]`;
       if (prop === 'prototype') return t.prototype;
-      if (prop === 'dispose') return () => {};
+      if (prop === 'dispose') return ignore;
       return makeStub(`${name}.${prop}`, report);
     },
     set() {
@@ -74,4 +90,4 @@ function permissive(obj, name, report) {
   });
 }
 
-module.exports = { makeStub, permissive, NEVER_FIRES };
+module.exports = { makeStub, permissive, NEVER_FIRES, ignore };
