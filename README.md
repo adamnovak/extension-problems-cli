@@ -1,0 +1,108 @@
+# extension-problems-cli
+
+Run a VS Code extension from the command line, without VS Code, and print the
+problems it would show in the Problems tab.
+
+It is built to run [SonarQube for IDE](https://github.com/SonarSource/sonarlint-vscode)
+(formerly SonarLint) against a C/C++ `compile_commands.json`. It implements the
+parts of the `vscode` extension API that the extension uses, loads the
+extension's own code from its `.vsix`, opens each source file in the
+compilation database, and collects what the extension puts in its diagnostic
+collections.
+
+## Requirements
+
+* Node.js 20 or newer
+* For SonarQube for IDE: a Java 21+ runtime. On Ubuntu:
+  `sudo apt install openjdk-21-jre-headless`
+* The extension `.vsix`, from the
+  [sonarlint-vscode releases page](https://github.com/SonarSource/sonarlint-vscode/releases).
+  The platform-independent `sonarlint-vscode-<version>.vsix` works on any
+  platform that has a system Java.
+
+```
+npm install
+```
+
+## Usage
+
+```
+bin/extension-problems-cli.js --extension sonarlint-vscode-6.1.0.vsix \
+    --workspace path/to/project path/to/compile_commands.json
+```
+
+Output is JSON:
+
+```json
+{
+  "extension": "SonarSource.sonarlint-vscode",
+  "problems": [
+    {
+      "file": "/path/to/project/src/util.cpp",
+      "line": 11,
+      "column": 12,
+      "endLine": 11,
+      "endColumn": 17,
+      "severity": "warning",
+      "message": "Division by zero [+4 locations]",
+      "source": "sonarqube",
+      "code": "cpp:S3518",
+      "collection": "sonarlint"
+    }
+  ],
+  "unanalyzedFiles": []
+}
+```
+
+Lines and columns are 1-based, as in the editor's UI. `--format pretty`
+prints compiler-style lines instead:
+
+```
+src/util.cpp:11:12: warning: Division by zero [+4 locations] [sonarqube cpp:S3518]
+```
+
+Run `bin/extension-problems-cli.js --help` for all options. Useful ones:
+
+* `--setting KEY=VALUE` sets any extension setting, for example
+  `--setting 'sonarlint.rules={"cpp:S5827":{"level":"off"}}'`.
+* `--file FILE` analyzes only some of the files.
+* `--log FILE` saves the extension's output channels, its messages to the
+  user, and the unimplemented API members it touched.
+
+Exit status is 0 when every file got results, 2 when some files got none
+before `--timeout`, and 1 on other errors.
+
+### SonarQube for IDE settings
+
+When the extension is SonarQube for IDE, the tool sets:
+
+* `sonarlint.disableTelemetry` to `true`, and passes
+  `-Dsonarlint.monitoring.enabled=false -Dsonarlint.telemetry.disabled=true`
+  to its language server through `sonarlint.ls.vmargs`. The editor-wide
+  `vscode.env.isTelemetryEnabled` is also `false`.
+* `sonarlint.pathToCompileCommands` to the given `compile_commands.json`.
+* `sonarlint.ls.javaHome` to `--java-home`, or else `JAVA_HOME`, or else the
+  installation that the `java` on `PATH` belongs to.
+
+### First run
+
+SonarQube for IDE downloads its C/C++ analyzer the first time it runs on a
+machine, and the language server keeps it under `~/.sonarlint`. That download
+can take longer than the default 5-second `--settle` time, in which case the
+first run reports no C++ problems. Use a longer settle time for the first run:
+
+```
+bin/extension-problems-cli.js --settle 60 --extension ... compile_commands.json
+```
+
+## How it works
+
+* `src/vscode-api/` is the `vscode` module. `require('vscode')` from the
+  extension resolves to it. API members it lacks are replaced by inert stand-ins
+  and logged, so new extension versions degrade rather than crash.
+* `src/host.js` unpacks the `.vsix` (cached under `--state-dir`), activates
+  the extension, opens and shows each file, and waits until every file has had
+  diagnostics published and the extension has been quiet (no new diagnostics
+  and no `window.withProgress` task running) for `--settle` seconds.
+* Messages the extension shows to the user are logged and dismissed. Commands
+  it runs on the editor itself are logged and do nothing.
