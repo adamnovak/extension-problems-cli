@@ -66,3 +66,23 @@ test('readiness rules match values at wildcard paths', () => {
   assert.ok(!isNotReady(rule, { pluginStatuses: [{ state: 0 }, { state: 3 }] }));
   assert.ok(!isNotReady(rule, {}));
 });
+
+test('collectFiles keeps named files and searches named directories', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { collectFiles } = require('../src/files');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'collect-files-test-'));
+  try {
+    for (const rel of ['a/one.cpp', 'a/one.h', 'a/notes.bin', 'a/.hidden/two.cpp', 'a/node_modules/three.js', 'b/four.cpp']) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), '');
+    }
+    const known = (f) => ['.cpp', '.h', '.js'].includes(path.extname(f));
+    const found = collectFiles([path.join(root, 'a'), path.join(root, 'b/four.cpp')], known)
+      .map((f) => path.relative(root, f)).sort();
+    assert.deepStrictEqual(found, ['a/one.cpp', 'a/one.h', 'b/four.cpp']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

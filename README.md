@@ -24,12 +24,19 @@ directories recursively, skipping hidden ones and `node_modules`:
 npx github:adamnovak/extension-problems-cli --extension EXTENSION.vsix src test
 ```
 
-For C or C++, give it your compilation database instead. It analyzes every
-file listed there:
+For C or C++, also give it your compilation database. With no files or
+directories, it analyzes every file listed in the database:
 
 ```
 npx github:adamnovak/extension-problems-cli --extension EXTENSION.vsix \
     --compile-commands build/compile_commands.json
+```
+
+With files or directories, it analyzes only those:
+
+```
+npx github:adamnovak/extension-problems-cli --extension EXTENSION.vsix \
+    --compile-commands build/compile_commands.json src/parser src/main.cpp
 ```
 
 `--setting KEY=VALUE` sets an extension setting, as in VS Code's
