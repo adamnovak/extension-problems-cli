@@ -217,9 +217,21 @@ class Workbench {
     for (const name of [
       'openTextDocument', 'closeTextDocument', 'changeTextDocument', 'saveTextDocument',
       'changeVisibleTextEditors', 'changeActiveTextEditor', 'changeDiagnostics',
-      'diagnosticsSet', 'progressChange',
+      'diagnosticsSet', 'progressChange', 'languageClientFound',
     ]) {
       this.emitters[name] = new EventEmitter();
+    }
+
+    // LanguageClient objects from vscode-languageclient, which extensions
+    // bundle privately. They are found when the library's features subscribe
+    // to editor events, passing themselves as `thisArgs`.
+    this.languageClients = new Set();
+    for (const emitter of [...Object.values(this.emitters), this.configuration._onDidChange]) {
+      const { event } = emitter;
+      emitter.event = (listener, thisArgs, disposables) => {
+        this._noticeLanguageClient(thisArgs);
+        return event(listener, thisArgs, disposables);
+      };
     }
 
     this.api = this._buildApi();
@@ -250,6 +262,37 @@ class Workbench {
     this.documents.set(key, doc);
     this.emitters.openTextDocument.fire(doc);
     return doc;
+  }
+
+  _noticeLanguageClient(obj) {
+    // TODO: `_client` is a private field of vscode-languageclient's document
+    // sync features; is there a public path to the client?
+    for (const candidate of [obj, obj?._client]) {
+      if (candidate && typeof candidate.sendRequest === 'function' && typeof candidate.onNotification === 'function'
+        && !this.languageClients.has(candidate)) {
+        this.languageClients.add(candidate);
+        this.emitters.languageClientFound.fire(candidate);
+      }
+    }
+  }
+
+  /** Close a document, and its editor if it has one. */
+  closeDocument(doc) {
+    if (this.documents.get(doc.uri.toString()) !== doc) {
+      return;
+    }
+    const editors = this.visibleEditors.filter((e) => e.document !== doc);
+    if (editors.length !== this.visibleEditors.length) {
+      this.visibleEditors = editors;
+      this.emitters.changeVisibleTextEditors.fire(this.visibleEditors);
+      if (this.activeEditor?.document === doc) {
+        this.activeEditor = editors[editors.length - 1];
+        this.emitters.changeActiveTextEditor.fire(this.activeEditor);
+      }
+    }
+    this.documents.delete(doc.uri.toString());
+    doc.isClosed = true;
+    this.emitters.closeTextDocument.fire(doc);
   }
 
   showDocument(doc) {

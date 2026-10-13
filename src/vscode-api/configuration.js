@@ -65,7 +65,10 @@ class ConfigurationStore {
     this._defaults = {};
     this._user = {};
     this._onDidChange = new EventEmitter();
-    this.onDidChangeConfiguration = this._onDidChange.event;
+  }
+
+  get onDidChangeConfiguration() {
+    return this._onDidChange.event;
   }
 
   addDefaultsFromManifest(manifest) {

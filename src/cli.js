@@ -7,6 +7,7 @@ const childProcess = require('child_process');
 const { parseArgs } = require('util');
 
 const { readSettingsFile, defaultSettingsFile, resolveSettings } = require('./settings');
+const { loadReadinessRule } = require('./readiness');
 
 const USAGE = `\
 Usage: extension-problems-cli --extension <vsix-or-dir> [options] <compile_commands.json>
@@ -26,9 +27,8 @@ Options:
                        These override the defaults this tool ships for the
                        extension, in extension-defaults/.
   --format FORMAT      json (default) or pretty.
-  --settle SECONDS     How long the extension must be quiet before results
-                       are final (default: 5).
-  --timeout SECONDS    Give up waiting after this long (default: 600).
+  --timeout SECONDS    Give up waiting for results after this long
+                       (default: 1800).
   --state-dir DIR      Where to keep extension storage between runs
                        (default: $XDG_CACHE_HOME/extension-problems-cli).
   --log FILE           Write extension output channels and messages to FILE.
@@ -170,8 +170,7 @@ async function main(argv) {
       setting: { type: 'string', multiple: true },
       settings: { type: 'string' },
       format: { type: 'string', default: 'json' },
-      settle: { type: 'string', default: '5' },
-      timeout: { type: 'string', default: '600' },
+      timeout: { type: 'string', default: '1800' },
       'state-dir': { type: 'string' },
       log: { type: 'string' },
       verbose: { type: 'boolean', default: false },
@@ -258,7 +257,7 @@ async function main(argv) {
   try {
     await host.activate();
     const { timedOut, unreported } = await host.analyze(files, {
-      settleMs: Number(values.settle) * 1000,
+      readiness: loadReadinessRule(host.id),
       timeoutMs: Number(values.timeout) * 1000,
     });
     if (timedOut) {

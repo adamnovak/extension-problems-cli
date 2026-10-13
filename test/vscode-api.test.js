@@ -53,3 +53,11 @@ test('document selectors match by language, scheme and pattern', () => {
   assert.ok(matchSelector({ pattern: '**/*.cpp' }, doc) > 0);
   assert.strictEqual(matchSelector({ pattern: '**/*.py' }, doc), 0);
 });
+
+test('readiness rules match values at wildcard paths', () => {
+  const { isNotReady } = require('../src/readiness');
+  const rule = { notReadyWhen: { path: 'pluginStatuses.*.state', equals: 2 } };
+  assert.ok(isNotReady(rule, { pluginStatuses: [{ state: 0 }, { state: 2 }] }));
+  assert.ok(!isNotReady(rule, { pluginStatuses: [{ state: 0 }, { state: 3 }] }));
+  assert.ok(!isNotReady(rule, {}));
+});

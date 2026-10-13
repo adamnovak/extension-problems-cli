@@ -93,16 +93,18 @@ A setting that uses an unavailable variable is skipped.
 The SonarQube for IDE defaults turn off telemetry and monitoring and point the
 extension at the compilation database.
 
-### First run
+### Waiting for the language server
 
-SonarQube for IDE downloads its C/C++ analyzer the first time it runs on a
-machine, and the language server keeps it under `~/.sonarlint`. That download
-can take longer than the default 5-second `--settle` time, in which case the
-first run reports no C++ problems. Use a longer settle time for the first run:
+Some extensions' language servers are not ready to analyze right away;
+SonarQube for IDE, for example, downloads its C/C++ analyzer on first use.
+`extension-defaults/<extension id>.readiness.jsonc` says how to ask the
+server whether it is ready: an LSP request to send through the extension's
+language client, and which response values mean "not ready". Files are opened
+only when the server is ready, and opened again if it stops being ready.
 
-```
-bin/extension-problems-cli.js --settle 60 --extension ... compile_commands.json
-```
+The extension's `LanguageClient` is found when vscode-languageclient's
+document features subscribe to editor events, passing themselves as
+`thisArgs`; the client is their private `_client` field.
 
 ## License
 
@@ -117,7 +119,6 @@ license in `src/vscode-api/LICENSE.txt`.
   and logged, so new extension versions degrade rather than crash.
 * `src/host.js` unpacks the `.vsix` (cached under `--state-dir`), activates
   the extension, opens and shows each file, and waits until every file has had
-  diagnostics published and the extension has been quiet (no new diagnostics
-  and no `window.withProgress` task running) for `--settle` seconds.
+  diagnostics published and no `window.withProgress` task is running.
 * Messages the extension shows to the user are logged and dismissed. Commands
   it runs on the editor itself are logged and do nothing.

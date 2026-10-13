@@ -4,10 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const jsonc = require('jsonc-parser');
 
-// Settings files shipped with this tool, named `<extension id>.jsonc`.
+// Files shipped with this tool to configure particular extensions.
 const DEFAULTS_DIR = path.resolve(__dirname, '..', 'extension-defaults');
 
-/** Read a settings.json-style file, which may have comments and trailing commas. */
+/** Read a JSON object from a file that may have comments and trailing commas, like settings.json. */
 function readSettingsFile(file) {
   const errors = [];
   const value = jsonc.parse(fs.readFileSync(file, 'utf8'), errors, { allowTrailingComma: true });
@@ -16,22 +16,30 @@ function readSettingsFile(file) {
     throw new Error(`${file}: ${jsonc.printParseErrorCode(error)} at offset ${offset}`);
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${file}: settings must be a JSON object`);
+    throw new Error(`${file}: must contain a JSON object`);
   }
   return value;
 }
 
-/** Find the shipped default settings file for an extension ID, if there is one. */
-function defaultSettingsFile(extensionId) {
+/**
+ * Find a file shipped for an extension in extension-defaults/, named
+ * `<extension id><suffix>`. Extension IDs are case-insensitive.
+ */
+function findDefaultsFile(extensionId, suffix) {
   let names;
   try {
     names = fs.readdirSync(DEFAULTS_DIR);
   } catch {
     return undefined;
   }
-  // Extension IDs are case-insensitive.
-  const name = names.find((n) => n.toLowerCase() === `${extensionId.toLowerCase()}.jsonc`);
+  const wanted = `${extensionId}${suffix}`.toLowerCase();
+  const name = names.find((n) => n.toLowerCase() === wanted);
   return name && path.join(DEFAULTS_DIR, name);
+}
+
+/** Find the shipped default settings file for an extension ID, if there is one. */
+function defaultSettingsFile(extensionId) {
+  return findDefaultsFile(extensionId, '.jsonc');
 }
 
 class UnresolvedVariableError extends Error {}
@@ -78,4 +86,4 @@ function resolveSettings(settings, variables, warn) {
   return out;
 }
 
-module.exports = { readSettingsFile, defaultSettingsFile, resolveSettings, substitute };
+module.exports = { readSettingsFile, findDefaultsFile, defaultSettingsFile, resolveSettings, substitute };
